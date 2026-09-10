@@ -31,13 +31,14 @@ main.on{display:flex}
 #buf{color:var(--accent);letter-spacing:2px}
 #ring{position:fixed;display:none;pointer-events:none;border-radius:20px;z-index:60;mix-blend-mode:screen}
 #gaze{position:fixed;left:0;top:0;width:50px;height:50px;border:4px solid var(--accent);border-radius:50%;pointer-events:none;z-index:70;opacity:.85;box-shadow:0 0 18px rgba(255,176,32,.5)}
-#faceLost{position:fixed;inset:0;background:rgba(13,17,23,.92);z-index:80;display:flex;align-items:center;justify-content:center;font-size:clamp(24px,5vw,40px);text-align:center;padding:30px}
+#faceLost{position:fixed;inset:0;background:rgba(13,17,23,.92);z-index:80;align-items:center;justify-content:center;font-size:clamp(24px,5vw,40px);text-align:center;padding:30px;pointer-events:none}
+#faceLost:not([hidden]){display:flex}
 #calib{position:fixed;inset:0;background:rgba(6,8,11,.96);z-index:90}
 #calibDot{position:absolute;width:70px;height:70px;margin:-35px 0 0 -35px;border-radius:50%;background:var(--accent);box-shadow:0 0 30px var(--accent);animation:pulse 1s infinite}
 @keyframes pulse{50%{transform:scale(.75)}}
 #calibHint{position:absolute;left:0;right:0;bottom:8%;text-align:center;font-size:clamp(20px,4vw,30px);color:var(--dim)}
 #calibX{position:absolute;top:20px;right:24px;font-size:44px;color:var(--dim);background:none;border:none}
-#toast{position:fixed;left:50%;bottom:8%;transform:translateX(-50%);background:#000c;border:1px solid #33415c;padding:14px 28px;border-radius:14px;font-size:clamp(18px,3.4vw,26px);z-index:100;display:none;max-width:86vw;text-align:center}
+#toast{position:fixed;left:50%;bottom:8%;transform:translateX(-50%);background:#000c;border:1px solid #33415c;padding:14px 28px;border-radius:14px;font-size:clamp(18px,3.4vw,26px);z-index:100;display:none;max-width:86vw;text-align:center;pointer-events:none}
 #flash{position:fixed;inset:0;background:var(--danger);opacity:0;pointer-events:none;z-index:75;transition:opacity .2s}
 #flash.on{opacity:.35;animation:fl .5s 6}
 @keyframes fl{50%{opacity:.05}}
