@@ -12,7 +12,7 @@
 html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;overflow:hidden;user-select:none}
 main{position:fixed;inset:0;padding:12px;display:none;flex-direction:column;gap:12px}
 main.on{display:flex}
-#topbar{display:flex;gap:10px;align-items:stretch}
+#topbar{display:flex;gap:10px;align-items:stretch;position:relative;z-index:2}
 #sent{flex:1;background:var(--card);border:2px solid #33415c;border-radius:16px;padding:14px 18px;font-size:clamp(22px,4.5vw,34px);min-height:64px;display:flex;align-items:center;overflow:hidden}
 .tbtn{min-width:96px;border:none;border-radius:16px;font-size:clamp(20px,3.6vw,28px);font-weight:700;padding:10px 18px;color:#0d1117;background:var(--accent)}
 .tbtn.gray{background:var(--card2);color:var(--text)}
@@ -82,7 +82,7 @@ h2{margin:4px 0;font-size:clamp(22px,4vw,32px)}
 </main>
 
 <main id="scr-set">
-  <div class="backrow"><div class="cell" data-cell data-act="go" data-t="scr-home">‹ 返回</div><h2 style="flex:1;text-align:center">设置（看护人）v1.3</h2></div>
+  <div class="backrow"><div class="cell" data-cell data-act="go" data-t="scr-home">‹ 返回</div><h2 style="flex:1;text-align:center">设置（看护人）v1.4</h2></div>
   <div style="overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding-bottom:20px">
     <div class="setrow"><span>停留选择时间</span><input type="range" id="setDwell" min="400" max="2200" step="100"><b id="dwellV"></b></div>
     <div class="setrow"><span>使用眼睛</span><select id="setEye"><option value="both">双眼</option><option value="left">仅左眼</option><option value="right">仅右眼</option></select></div>
@@ -239,6 +239,7 @@ function activate(el){
 let coef=JSON.parse(localStorage.getItem('eyeaac_coef')||'null');
 let calibrating=false,calibSamples=[],calibPt=null;
 let smooth={x:innerWidth/2,y:innerHeight/2},lastEl=null,dwellStart=0,lastAct=0,lastFace=0;
+let _lp=null,moveAcc=0,moveT=performance.now();
 let simPos={x:innerWidth/2,y:innerHeight/2};
 let VW=640,VH=480;
 const ring=$('#ring'),cursor=$('#gaze');
@@ -254,6 +255,8 @@ function frame(t){
   const faceOK=S.sim||performance.now()-lastFace<1200;
   $('#faceLost').hidden=faceOK;
   if(!faceOK||calibrating){ring.style.display='none';lastEl=null;return}
+  if(!useSim&&faceOK){if(_lp)moveAcc+=Math.hypot(cx-_lp.x,cy-_lp.y);_lp={x:cx,y:cy}}
+  if(performance.now()-moveT>12000){if(!useSim&&faceOK&&moveAcc<60&&ENG==='运行中')toast('⚠️ 视线几乎未移动：若黄圈卡在角落不动，请进「设置 → 重新校准眼控」');moveAcc=0;moveT=performance.now()}
   const hit=document.elementFromPoint(cx,cy);
   const el=hit&&hit.closest?hit.closest('[data-cell]'):null;
   if(!el||t-lastAct<900){ring.style.display='none';lastEl=null;return}
@@ -316,25 +319,39 @@ function fit(samples){
 }
 const PTS=[[.12,.16],[.5,.16],[.88,.16],[.12,.5],[.5,.5],[.88,.5],[.12,.84],[.5,.84],[.88,.84]];
 function startCalib(){
-  calibrating=true;calibSamples=[];coef=null;$('#calib').hidden=false;step(0);
+  calibrating=true;calibSamples=[];coef=null;$('#calib').hidden=false;step(0,0);
 }
-function step(i){
+function step(i,attempt){
   if(!calibrating)return;
   if(i>=PTS.length)return finishCalib();
   const dot=$('#calibDot');dot.style.left=PTS[i][0]*100+'%';dot.style.top=PTS[i][1]*100+'%';
   calibPt={sx:PTS[i][0]*innerWidth,sy:PTS[i][1]*innerHeight,n:0};
-  $('#calibHint').textContent=`校准时，请始终注视亮点（第 ${i+1}/${PTS.length} 个），保持头部不动`;
   const t0=performance.now();
-  (function tick(){if(!calibrating)return;
-    if(performance.now()-t0<1500)requestAnimationFrame(tick);
-    else if(calibPt.n<4){toast('该点样本不足，请正对屏幕');setTimeout(()=>step(i),800)}
-    else step(i+1)})();
+  (function tick(){
+    if(!calibrating)return;
+    const seen=performance.now()-lastFace<1000;
+    $('#calibHint').textContent=seen
+      ? `第 ${i+1}/${PTS.length} 个点：✓ 看到你了，保持注视亮点`
+      : `第 ${i+1}/${PTS.length} 个点：✗ 未检测到你的脸，请正对屏幕`;
+    if(performance.now()-t0<2000)requestAnimationFrame(tick);
+    else if(calibPt.n<8&&attempt<2){toast('该点有效样本不足，请一直盯着亮点');setTimeout(()=>step(i,attempt+1),900)}
+    else step(i+1,0);
+  })();
 }
 function finishCalib(){
   calibrating=false;$('#calib').hidden=true;
-  if(calibSamples.length<30){toast('校准失败，请重试');return}
-  coef=fit(calibSamples);localStorage.setItem('eyeaac_coef',JSON.stringify(coef));
-  toast('✅ 校准完成，眼控已开启');
+  if(calibSamples.length<25){coef=null;localStorage.removeItem('eyeaac_coef');toast('校准失败：有效样本不足，请重新校准');return}
+  const A=[[0,0,0],[0,0,0],[0,0,0]],bx=[0,0,0],by=[0,0,0];
+  for(const sp of calibSamples){const r=[sp.gx,sp.gy,1];
+    for(let a=0;a<3;a++){for(let b=0;b<3;b++)A[a][b]+=r[a]*r[b];bx[a]+=r[a]*sp.sx;by[a]+=r[a]*sp.sy}}
+  const lam=(A[0][0]+A[1][1])*0.005+1e-8;
+  for(let a=0;a<3;a++)A[a][a]+=lam;
+  coef={x:solve3(A.map(r=>r.slice()),bx.slice()),y:solve3(A.map(r=>r.slice()),by.slice())};
+  let err=0;
+  for(const sp of calibSamples){err+=Math.hypot(coef.x[0]*sp.gx+coef.x[1]*sp.gy+coef.x[2]-sp.sx,coef.y[0]*sp.gx+coef.y[1]*sp.gy+coef.y[2]-sp.sy)}
+  err/=calibSamples.length;
+  localStorage.setItem('eyeaac_coef',JSON.stringify(coef));
+  toast(err>innerWidth*.09?'校准完成，但检测到偏差偏大。如果黄圈定位不准，请重新校准':'✅ 校准完成，眼控已开启');
 }
 
 function loadScript(src){return new Promise((res,rej)=>{const sc=document.createElement('script');sc.onload=res;sc.onerror=rej;sc.src=src;document.head.appendChild(sc)})}
@@ -346,7 +363,7 @@ async function ensureEngine(){
   return typeof FaceMesh!=='undefined';
 }
 function enableSim(msg){S.sim=true;$('#setSim').checked=true;saveS();toast(msg)}
-let ENG='加载中',engErr=0;const V='1.3';
+let ENG='加载中',engErr=0;const V='1.4';
 /* ================= 摄像头初始化 ================= */
 async function init(){
   renderHome();renderKb();
