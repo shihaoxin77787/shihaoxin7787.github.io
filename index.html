@@ -82,7 +82,7 @@ h2{margin:4px 0;font-size:clamp(22px,4vw,32px)}
 </main>
 
 <main id="scr-set">
-  <div class="backrow"><div class="cell" data-cell data-act="go" data-t="scr-home">‹ 返回</div><h2 style="flex:1;text-align:center">设置（看护人）v1.4</h2></div>
+  <div class="backrow"><div class="cell" data-cell data-act="go" data-t="scr-home">‹ 返回</div><h2 style="flex:1;text-align:center">设置（看护人）v1.5</h2></div>
   <div style="overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding-bottom:20px">
     <div class="setrow"><span>停留选择时间</span><input type="range" id="setDwell" min="400" max="2200" step="100"><b id="dwellV"></b></div>
     <div class="setrow"><span>使用眼睛</span><select id="setEye"><option value="both">双眼</option><option value="left">仅左眼</option><option value="right">仅右眼</option></select></div>
@@ -104,6 +104,7 @@ h2{margin:4px 0;font-size:clamp(22px,4vw,32px)}
   <div id="calibDot"></div>
   <div id="calibHint">校准时，请始终注视亮点，保持头部不动</div>
   <button id="calibX" data-cell data-act="calibCancel">✕</button>
+  <button data-cell data-act="calibSkip" style="position:absolute;top:20px;left:24px;font-size:20px;padding:10px 18px;border-radius:12px;border:1px solid #33415c;background:#1b2430;color:#8b98a5">跳过，先用触摸模式</button>
 </div>
 
 <div id="flash"></div>
@@ -229,6 +230,7 @@ function activate(el){
     case 'pick':addSent(el.dataset.t);kb={sheng:null,buf:''};renderKb();break;
     case 'calib':startCalib();break;
     case 'calibCancel':calibrating=false;$('#calib').hidden=true;break;
+    case 'calibSkip':calibrating=false;$('#calib').hidden=true;enableSim('已跳过校准，进入触摸模式；之后可在「设置 → 重新校准眼控」再校准');break;
     case 'saveCustom':CUSTOM=$('#customTa').value.split('\n').map(x=>x.trim()).filter(Boolean);localStorage.setItem('eyeaac_c',JSON.stringify(CUSTOM));toast('已保存 '+CUSTOM.length+' 条自定义短语');renderHome();break;
     default:toast('该操作暂不支持');
   }
@@ -237,7 +239,7 @@ function activate(el){
 
 /* ================= 眼控引擎 ================= */
 let coef=JSON.parse(localStorage.getItem('eyeaac_coef')||'null');
-let calibrating=false,calibSamples=[],calibPt=null;
+let calibrating=false,calibSamples=[],calibPt=null,calibMeans=[];
 let smooth={x:innerWidth/2,y:innerHeight/2},lastEl=null,dwellStart=0,lastAct=0,lastFace=0;
 let _lp=null,moveAcc=0,moveT=performance.now();
 let simPos={x:innerWidth/2,y:innerHeight/2};
@@ -296,7 +298,7 @@ function onResults(res){
   const lm=res.multiFaceLandmarks&&res.multiFaceLandmarks[0];if(!lm)return;
   const f=computeFeat(lm);if(!f)return;
   if(S.blink)blink(lm);
-  if(calibrating&&calibPt){calibSamples.push({gx:f.gx,gy:f.gy,sx:calibPt.sx,sy:calibPt.sy});calibPt.n++;return}
+  if(calibrating&&calibPt){calibSamples.push({gx:f.gx,gy:f.gy,sx:calibPt.sx,sy:calibPt.sy});calibPt.n++;calibPt.batch.push({gx:f.gx,gy:f.gy});return}
   if(coef&&!S.sim){
     const tx=coef.x[0]*f.gx+coef.x[1]*f.gy+coef.x[2];
     const ty=coef.y[0]*f.gx+coef.y[1]*f.gy+coef.y[2];
@@ -318,29 +320,45 @@ function fit(samples){
   return {x:solve3(A.map(r=>r.slice()),bx.slice()),y:solve3(A.map(r=>r.slice()),by.slice())};
 }
 const PTS=[[.12,.16],[.5,.16],[.88,.16],[.12,.5],[.5,.5],[.88,.5],[.12,.84],[.5,.84],[.88,.84]];
+function bstd(b,k){if(b.length<2)return 9;const m=b.reduce((t,x)=>t+x[k],0)/b.length;return Math.sqrt(b.reduce((t,x)=>t+(x[k]-m)*(x[k]-m),0)/b.length)}
 function startCalib(){
-  calibrating=true;calibSamples=[];coef=null;$('#calib').hidden=false;step(0,0);
+  calibrating=true;calibSamples=[];calibMeans=[];coef=null;$('#calib').hidden=false;step(0,0);
 }
 function step(i,attempt){
   if(!calibrating)return;
   if(i>=PTS.length)return finishCalib();
   const dot=$('#calibDot');dot.style.left=PTS[i][0]*100+'%';dot.style.top=PTS[i][1]*100+'%';
-  calibPt={sx:PTS[i][0]*innerWidth,sy:PTS[i][1]*innerHeight,n:0};
+  calibPt={sx:PTS[i][0]*innerWidth,sy:PTS[i][1]*innerHeight,n:0,batch:[]};
   const t0=performance.now();
   (function tick(){
     if(!calibrating)return;
     const seen=performance.now()-lastFace<1000;
-    $('#calibHint').textContent=seen
-      ? `第 ${i+1}/${PTS.length} 个点：✓ 看到你了，保持注视亮点`
-      : `第 ${i+1}/${PTS.length} 个点：✗ 未检测到你的脸，请正对屏幕`;
-    if(performance.now()-t0<2000)requestAnimationFrame(tick);
-    else if(calibPt.n<8&&attempt<2){toast('该点有效样本不足，请一直盯着亮点');setTimeout(()=>step(i,attempt+1),900)}
-    else step(i+1,0);
+    if(!seen)$('#calibHint').textContent=`第 ${i+1}/${PTS.length} 个点：✗ 未检测到你的脸，请正对屏幕`;
+    else{
+      const sg=bstd(calibPt.batch,'gx'),sy2=bstd(calibPt.batch,'gy');
+      $('#calibHint').textContent=(calibPt.batch.length>12&&sg<0.02&&sy2<0.03)
+        ?`第 ${i+1}/${PTS.length} 个点：✓ 稳定注视中`
+        :`第 ${i+1}/${PTS.length} 个点：请盯住亮点，不要移开`;
+    }
+    if(performance.now()-t0<1800)requestAnimationFrame(tick);
+    else{
+      const b=calibPt.batch,sg=bstd(b,'gx'),sy2=bstd(b,'gy');
+      if(b.length<8||sg>0.02||sy2>0.03){
+        if(attempt<2){toast('该点视线不稳定：请一直盯住亮点直到它自己跳到下一个');setTimeout(()=>step(i,attempt+1),900)}
+        else step(i+1,0);
+      }else{
+        calibMeans.push({gx:b.reduce((t,x)=>t+x.gx,0)/b.length,gy:b.reduce((t,x)=>t+x.gy,0)/b.length});
+        step(i+1,0);
+      }
+    }
   })();
 }
 function finishCalib(){
   calibrating=false;$('#calib').hidden=true;
-  if(calibSamples.length<25){coef=null;localStorage.removeItem('eyeaac_coef');toast('校准失败：有效样本不足，请重新校准');return}
+  if(calibSamples.length<25||calibMeans.length<5){coef=null;localStorage.removeItem('eyeaac_coef');toast('校准失败：有效注视数据不足，请重新校准');return}
+  let mx=0;
+  for(const a of calibMeans)for(const b of calibMeans)mx=Math.max(mx,Math.hypot(a.gx-b.gx,a.gy-b.gy));
+  if(mx<0.008){coef=null;localStorage.removeItem('eyeaac_coef');toast('校准未通过：没有检测到你的视线移动。请确认校准时眼睛始终跟着亮点走');return}
   const A=[[0,0,0],[0,0,0],[0,0,0]],bx=[0,0,0],by=[0,0,0];
   for(const sp of calibSamples){const r=[sp.gx,sp.gy,1];
     for(let a=0;a<3;a++){for(let b=0;b<3;b++)A[a][b]+=r[a]*r[b];bx[a]+=r[a]*sp.sx;by[a]+=r[a]*sp.sy}}
@@ -353,17 +371,6 @@ function finishCalib(){
   localStorage.setItem('eyeaac_coef',JSON.stringify(coef));
   toast(err>innerWidth*.09?'校准完成，但检测到偏差偏大。如果黄圈定位不准，请重新校准':'✅ 校准完成，眼控已开启');
 }
-
-function loadScript(src){return new Promise((res,rej)=>{const sc=document.createElement('script');sc.onload=res;sc.onerror=rej;sc.src=src;document.head.appendChild(sc)})}
-async function ensureEngine(){
-  if(typeof FaceMesh!=='undefined'&&!window._fmFail)return true;
-  for(const m of ['https://testingcf.jsdelivr.net/npm/@mediapipe/face_mesh/','https://gcore.jsdelivr.net/npm/@mediapipe/face_mesh/','https://fastly.jsdelivr.net/npm/@mediapipe/face_mesh/']){
-    try{window._FM_BASE=m;await loadScript(m+'face_mesh.js');if(typeof FaceMesh!=='undefined')return true}catch(e){}
-  }
-  return typeof FaceMesh!=='undefined';
-}
-function enableSim(msg){S.sim=true;$('#setSim').checked=true;saveS();toast(msg)}
-let ENG='加载中',engErr=0;const V='1.4';
 /* ================= 摄像头初始化 ================= */
 async function init(){
   renderHome();renderKb();
