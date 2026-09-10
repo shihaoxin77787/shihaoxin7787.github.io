@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>眼语 · 眼控沟通助手</title>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+<script>window._FM_BASE='https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/';</script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" onerror="window._fmFail=1"></script>
 <style>
 :root{--bg:#0d1117;--card:#1b2430;--card2:#232f3f;--accent:#ffb020;--danger:#e5484d;--text:#f2f5f8;--dim:#8b98a5}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -198,7 +199,11 @@ function emergency(){speak('我需要帮助，请快来帮我！');beep(5);$('#f
 function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(()=>t.style.display='none',2200)}
 
 /* ================= 激活动作 ================= */
+let _act=false;
+document.addEventListener('click',e=>{const el=e.target&&e.target.closest?e.target.closest('[data-cell]'):null;if(el)activate(el)});
 function activate(el){
+  if(_act)return;_act=true;
+  try{
   const a=el.dataset.act;
   switch(a){
     case 'say':addSent(el.dataset.t);break;
@@ -222,8 +227,9 @@ function activate(el){
     case 'calib':startCalib();break;
     case 'calibCancel':calibrating=false;$('#calib').hidden=true;break;
     case 'saveCustom':CUSTOM=$('#customTa').value.split('\n').map(x=>x.trim()).filter(Boolean);localStorage.setItem('eyeaac_c',JSON.stringify(CUSTOM));toast('已保存 '+CUSTOM.length+' 条自定义短语');renderHome();break;
-    default:el.click();
+    default:toast('该操作暂不支持');
   }
+  }finally{_act=false}
 }
 
 /* ================= 眼控引擎 ================= */
@@ -326,15 +332,22 @@ function finishCalib(){
   toast('✅ 校准完成，眼控已开启');
 }
 
+function loadScript(src){return new Promise((res,rej)=>{const sc=document.createElement('script');sc.onload=res;sc.onerror=rej;sc.src=src;document.head.appendChild(sc)})}
+async function ensureEngine(){
+  if(typeof FaceMesh!=='undefined'&&!window._fmFail)return true;
+  for(const m of ['https://testingcf.jsdelivr.net/npm/@mediapipe/face_mesh/','https://gcore.jsdelivr.net/npm/@mediapipe/face_mesh/','https://fastly.jsdelivr.net/npm/@mediapipe/face_mesh/']){
+    try{window._FM_BASE=m;await loadScript(m+'face_mesh.js');if(typeof FaceMesh!=='undefined')return true}catch(e){}
+  }
+  return typeof FaceMesh!=='undefined';
+}
+function enableSim(msg){S.sim=true;$('#setSim').checked=true;saveS();toast(msg)}
 /* ================= 摄像头初始化 ================= */
 async function init(){
   renderHome();renderKb();
   try{navigator.wakeLock&&await navigator.wakeLock.request('screen')}catch(e){}
-  if(typeof FaceMesh==='undefined'){
-    toast('眼控引擎加载失败（需联网首次加载），已切换鼠标模拟模式');
-    S.sim=true;$('#setSim').checked=true;return;
-  }
-  const fm=new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
+  toast('正在加载眼控引擎…');
+  if(!await ensureEngine()){enableSim('眼控引擎加载失败，已进入触摸模式。建议安装 Chrome 浏览器后刷新重试');return;}
+  const fm=new FaceMesh({locateFile:f=>window._FM_BASE+f});
   fm.setOptions({maxNumFaces:1,refineLandmarks:true,minDetectionConfidence:.5,minTrackingConfidence:.5});
   fm.onResults(onResults);
   const video=$('#cam');
@@ -349,6 +362,7 @@ async function init(){
       try{await fm.send({image:video})}catch(e){}busy=false;
     })();
     if(!coef)startCalib();
+    setTimeout(()=>{if(lastFace===0&&!calibrating&&!S.sim){enableSim('眼控引擎未响应，已进入触摸模式。建议换 Chrome 浏览器后刷新重试')}},25000);
   }catch(e){
     toast('无法访问摄像头，已切换鼠标模拟模式（设置中可重试）');
     S.sim=true;$('#setSim').checked=true;
