@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>眼语 · 眼控沟通助手</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+<style>
+:root{--bg:#0d1117;--card:#1b2430;--card2:#232f3f;--accent:#ffb020;--danger:#e5484d;--text:#f2f5f8;--dim:#8b98a5}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;overflow:hidden;user-select:none}
+main{position:fixed;inset:0;padding:12px;display:none;flex-direction:column;gap:12px}
+main.on{display:flex}
+#topbar{display:flex;gap:10px;align-items:stretch}
+#sent{flex:1;background:var(--card);border:2px solid #33415c;border-radius:16px;padding:14px 18px;font-size:clamp(22px,4.5vw,34px);min-height:64px;display:flex;align-items:center;overflow:hidden}
+.tbtn{min-width:96px;border:none;border-radius:16px;font-size:clamp(20px,3.6vw,28px);font-weight:700;padding:10px 18px;color:#0d1117;background:var(--accent)}
+.tbtn.gray{background:var(--card2);color:var(--text)}
+.grid{display:grid;gap:14px;flex:1;min-height:0}
+.grid.c2{grid-template-columns:1fr 1fr}
+.grid.c3{grid-template-columns:1fr 1fr 1fr}
+.grid.c4{grid-template-columns:1fr 1fr 1fr 1fr}
+.cell{position:relative;background:var(--card);border:2px solid #33415c;border-radius:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-size:clamp(20px,3.8vw,30px);font-weight:600;text-align:center;padding:10px;cursor:pointer;overflow:hidden}
+.cell small{font-size:.5em;color:var(--dim);font-weight:400}
+.cell.red{background:#3a1518;border-color:var(--danger);color:#ffb3b5}
+.cell.green{background:#12291b;border-color:#2f9e56;color:#9fe6b8}
+.cell:active{transform:scale(.97)}
+.backrow{display:flex;gap:12px}
+.backrow .cell{flex:0 0 auto;min-width:150px}
+.kb-info{background:var(--card);border-radius:14px;padding:10px 16px;font-size:clamp(18px,3vw,26px);display:flex;justify-content:space-between;align-items:center;min-height:56px}
+#buf{color:var(--accent);letter-spacing:2px}
+#ring{position:fixed;display:none;pointer-events:none;border-radius:20px;z-index:60;mix-blend-mode:screen}
+#gaze{position:fixed;left:0;top:0;width:50px;height:50px;border:4px solid var(--accent);border-radius:50%;pointer-events:none;z-index:70;opacity:.85;box-shadow:0 0 18px rgba(255,176,32,.5)}
+#faceLost{position:fixed;inset:0;background:rgba(13,17,23,.92);z-index:80;display:flex;align-items:center;justify-content:center;font-size:clamp(24px,5vw,40px);text-align:center;padding:30px}
+#calib{position:fixed;inset:0;background:rgba(6,8,11,.96);z-index:90}
+#calibDot{position:absolute;width:70px;height:70px;margin:-35px 0 0 -35px;border-radius:50%;background:var(--accent);box-shadow:0 0 30px var(--accent);animation:pulse 1s infinite}
+@keyframes pulse{50%{transform:scale(.75)}}
+#calibHint{position:absolute;left:0;right:0;bottom:8%;text-align:center;font-size:clamp(20px,4vw,30px);color:var(--dim)}
+#calibX{position:absolute;top:20px;right:24px;font-size:44px;color:var(--dim);background:none;border:none}
+#toast{position:fixed;left:50%;bottom:8%;transform:translateX(-50%);background:#000c;border:1px solid #33415c;padding:14px 28px;border-radius:14px;font-size:clamp(18px,3.4vw,26px);z-index:100;display:none;max-width:86vw;text-align:center}
+#flash{position:fixed;inset:0;background:var(--danger);opacity:0;pointer-events:none;z-index:75;transition:opacity .2s}
+#flash.on{opacity:.35;animation:fl .5s 6}
+@keyframes fl{50%{opacity:.05}}
+#debug{position:fixed;right:10px;bottom:10px;z-index:65;background:#000a;border-radius:12px;padding:8px;font-size:13px;display:none;max-width:44vw}
+#debug video{width:160px;border-radius:8px;transform:scaleX(-1);display:block;margin-bottom:6px}
+#debug input,#debug select{width:100%;font-size:16px;margin:2px 0}
+.setrow{display:flex;justify-content:space-between;align-items:center;background:var(--card);border-radius:14px;padding:16px 20px;font-size:clamp(18px,3.2vw,26px);gap:16px}
+.setrow input[type=range]{flex:1;max-width:46vw;height:40px}
+.setrow select{font-size:22px;padding:6px 10px;border-radius:8px;background:var(--card2);color:var(--text);border:1px solid #33415c}
+.setrow input[type=checkbox]{width:34px;height:34px;accent-color:var(--accent)}
+textarea{width:100%;height:180px;background:var(--card2);color:var(--text);border:1px solid #33415c;border-radius:12px;font-size:22px;padding:14px}
+h2{margin:4px 0;font-size:clamp(22px,4vw,32px)}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div id="sent">（点击短语开始说话）</div>
+  <button class="tbtn" data-cell data-act="saySent">朗读</button>
+  <button class="tbtn gray" data-cell data-act="clearSent">清空</button>
+</div>
+
+<main id="scr-home" class="on"><div class="grid c3" id="homeGrid"></div></main>
+
+<main id="scr-cat">
+  <div class="backrow"><div class="cell" data-cell data-act="go" data-t="scr-home">‹ 返回</div><h2 id="catTitle" style="flex:1;text-align:center"></h2></div>
+  <div class="grid c3" id="catGrid" style="margin-top:6px"></div>
+</main>
+
+<main id="scr-kb">
+  <div class="backrow">
+    <div class="cell" data-cell data-act="go" data-t="scr-home">‹ 返回</div>
+    <div class="cell green" data-cell data-act="kbSay">📣 朗读整句</div>
+    <div class="cell red" data-cell data-act="kbDel">⌫ 删字</div>
+    <div class="cell gray" data-cell data-act="kbClear">清空</div>
+  </div>
+  <div class="kb-info"><span>拼音：<b id="buf"></b></span><span id="kbMsg" style="color:var(--dim)"></span></div>
+  <div class="grid c4" id="kbGrid" style="flex:1.2"></div>
+  <div class="grid c4" id="candGrid" style="flex:1"></div>
+</main>
+
+<main id="scr-set">
+  <div class="backrow"><div class="cell" data-cell data-act="go" data-t="scr-home">‹ 返回</div><h2 style="flex:1;text-align:center">设置（看护人）</h2></div>
+  <div style="overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding-bottom:20px">
+    <div class="setrow"><span>停留选择时间</span><input type="range" id="setDwell" min="400" max="2200" step="100"><b id="dwellV"></b></div>
+    <div class="setrow"><span>使用眼睛</span><select id="setEye"><option value="both">双眼</option><option value="left">仅左眼</option><option value="right">仅右眼</option></select></div>
+    <div class="setrow"><span>眨眼确认</span><input type="checkbox" id="setBlink"></div>
+    <div class="setrow"><span>语音语速</span><input type="range" id="setRate" min="0.5" max="1.6" step="0.1"><b id="rateV"></b></div>
+    <div class="setrow"><span>语音音量</span><input type="range" id="setVol" min="0.2" max="1" step="0.1"><b id="volV"></b></div>
+    <div class="setrow" id="simRow"><span>鼠标模拟模式（测试用）</span><input type="checkbox" id="setSim"></div>
+    <div class="setrow"><span>调试信息</span><input type="checkbox" id="setDebug"></div>
+    <div class="cell green" data-cell data-act="calib" style="min-height:90px">👁 重新校准眼控</div>
+    <h2>自定义常用语（每行一条）</h2>
+    <textarea id="customTa" placeholder="例如：我想晒太阳"></textarea>
+    <div class="cell" data-cell data-act="saveCustom" style="min-height:80px">保存自定义短语</div>
+  </div>
+</main>
+
+<div id="faceLost" hidden>😶 未检测到人脸<br><small style="font-size:.55em;color:var(--dim)">请正对屏幕，保持环境光线充足</small></div>
+
+<div id="calib" hidden>
+  <div id="calibDot"></div>
+  <div id="calibHint">校准时，请始终注视亮点，保持头部不动</div>
+  <button id="calibX" data-cell data-act="calibCancel">✕</button>
+</div>
+
+<div id="flash"></div>
+<div id="gaze" hidden></div>
+<div id="ring"></div>
+<div id="toast"></div>
+<video id="cam" playsinline muted style="display:none"></video>
+<div id="debug"><video id="dbgVideo" playsinline muted></video><div id="dbgTxt"></div></div>
+
+<script>
+/* ================= 基础状态 ================= */
+const $=s=>document.querySelector(s);
+const S=Object.assign({dwell:800,eye:'both',blink:true,rate:1,vol:1,sim:false,debug:false},
+  JSON.parse(localStorage.getItem('eyeaac_s')||'{}'));
+let CUSTOM=JSON.parse(localStorage.getItem('eyeaac_c')||'[]');
+let sent='';
+let voices=[];function loadVoices(){voices=speechSynthesis.getVoices()||[]}speechSynthesis.onvoiceschanged=loadVoices;loadVoices();
+
+const CATS={
+'基本需求':['我要喝水','我饿了，想吃饭','我想上厕所','请帮我翻身','我想坐起来','我想躺下','请帮我调整枕头','我想洗把脸'],
+'身体不适':['我不舒服','我头疼','我胸口发闷','我呼吸困难','我身上疼','我肚子疼','我觉得冷','我觉得热','请叫医生','我需要吸痰'],
+'情绪表达':['我很高兴','我很感动','我有点难过','我想安静一会儿','别担心我','谢谢你们','我想和你们说说话','抱抱我'],
+'社交用语':['你好','早上好','中午好','晚上好','晚安','再见','我同意','我不同意','请等一下','请再说一遍'],
+};
+const SINGLE={a:'啊阿',o:'哦噢',e:'鹅饿恶鄂',i:'一衣医伊',u:'屋无五吴',v:'于鱼余俞',ai:'爱挨哀',ei:'诶',ui:'为位未味',ao:'奥傲澳',ou:'欧偶',iu:'有又由',ie:'也页夜业',ve:'月越约悦',er:'而儿尔',an:'安按暗岸',en:'恩嗯',in:'因音阴',un:'文问温稳',vn:'云晕匀',ang:'昂',eng:'嗯',ing:'应硬映英',ong:'翁嗡',
+b:'不八把爸吧',p:'怕破平萍',m:'马吗妈买',f:'发法分',d:'的大得地',t:'他她它',n:'那哪呢',l:'了来里李',g:'个给高哥',k:'可开看',h:'好和还海',j:'就家见叫',q:'去起前七',x:'想下小笑',zh:'中这着只',ch:'吃出处',sh:'上说是水',r:'人日',z:'在再早子',c:'从才次',s:'三四送',y:'一要也',w:'我五无'};
+const WORDS=[['我','wo'],['我们','women'],['你','ni'],['您','nin'],['他','ta'],['她','ta'],['好','hao'],['你好','nihao'],['早上好','zaoshanghao'],['中午','zhongwu'],['晚上','wanshang'],['晚安','wanan'],['谢谢','xiexie'],['不客气','bukeqi'],['对不起','duibuqi'],['没关系','meiguanxi'],['请','qing'],['帮','bang'],['帮我','bangwo'],['帮助','bangzhu'],['帮忙','bangmang'],['要','yao'],['我想','woxiang'],['我要','woyao'],['喝水','heshui'],['吃饭','chifan'],['饭','fan'],['饿','e'],['了','le'],['水','shui'],['药','yao'],['吃药','chiyao'],['疼','teng'],['痛','tong'],['头','tou'],['头疼','touteng'],['身体','shenti'],['舒服','shufu'],['不舒服','bushufu'],['休息','xiuxi'],['睡觉','shuijiao'],['起床','qichuang'],['冷','leng'],['热','re'],['痒','yang'],['医生','yisheng'],['护士','hushi'],['厕所','cesuo'],['床','chuang'],['椅子','yizi'],['手机','shouji'],['电视','dianshi'],['看','kan'],['听音乐','tingyinyue'],['音乐','yinyue'],['窗户','chuanghu'],['打开','dakai'],['开灯','kaideng'],['灯','deng'],['关','guan'],['空调','kongtiao'],['声音','shengyin'],['大','da'],['小','xiao'],['一点','yidian'],['想','xiang'],['去','qu'],['来','lai'],['在','zai'],['这里','zheli'],['哪里','nali'],['现在','xianzai'],['今天','jintian'],['明天','mingtian'],['早上','zaoshang'],['家人','jiaren'],['朋友','pengyou'],['爱','ai'],['爱你','aini'],['高兴','gaoxing'],['开心','kaixin'],['难过','nanguo'],['害怕','haipa'],['着急','zhaoji'],['担心','danxin'],['累','lei'],['困','kun'],['怕','pa'],['是','shi'],['不是','bushi'],['对','dui'],['的','de'],['吗','ma'],['呢','ne'],['和','he'],['可以','keyi'],['不可以','bukeyi'],['妈妈','mama'],['爸爸','baba'],['爷爷','yeye'],['奶奶','nainai'],['哥哥','gege'],['姐姐','jiejie'],['水果','shuiguo'],['苹果','pingguo'],['香蕉','xiangjiao'],['牛奶','niunai'],['汤','tang'],['粥','zhou'],['面条','miantiao'],['肉','rou'],['菜','cai'],['鸡蛋','jidan'],['眼睛','yanjing'],['耳朵','erduo'],['鼻子','bizi'],['手','shou'],['脚','jiao'],['背','bei'],['腰','yao'],['胸口','xiongkou'],['呼吸','huxi'],['快','kuai'],['慢','man'],['等','deng'],['没有','meiyou'],['有','you']];
+const SHENG='b p m f d t n l g k h j q x zh ch sh r z c s y w'.split(' ');
+const YUN='a o e i u v ai ei ui ao ou iu ie ve er an en in un vn ang eng ing ong'.split(' ');
+const SYL_SET=new Set(('a ai an ang ao ba bai ban bang bao bei ben beng bi bian biao bie bin bing bo bu ca cai can cang cao ce cen ceng cha chai chan chang chao che chen cheng chi chong chou chu chua chuai chuan chuang chui chun chuo ci cong cou cu cuan cui cun cuo da dai dan dang dao de dei deng di dian diao die ding diu dong dou du duan dui dun duo e ei en eng er fa fan fang fei fen feng fo fou fu ga gai gan gang gao ge gei gen geng gong gou gu gua guai guan guang gui gun guo ha hai han hang hao he hei hen heng hong hou hu hua huai huan huang hui hun huo ji jia jian jiang jiao jie jin jing jiong jiu ju juan jue jun ka kai kan kang kao ke ken keng kong kou ku kua kuai kuan kuang kui kun kuo la lai lan lang lao le lei leng li lia lian liang liao lie lin ling liu long lou lu lv luan lve lun luo ma mai man mang mao me mei men meng mi mian miao mie min ming miu mo mou mu na nai nan nang nao ne nei nen neng ni nian niang niao nie nin ning niu nong nou nu nv nve nuan nuo o ou pa pai pan pang pao pei pen peng pi pian piao pie pin ping po pou pu qi qia qian qiang qiao qie qin qing qiong qiu qu quan que qun ran rang rao re ren reng ri rong rou ru ruan rui run ruo sa sai san sang sao se sen seng sha shai shan shang shao she shei shen sheng shi shou shu shua shuai shuan shuang shui shun shuo si song sou su suan sui sun suo ta tai tan tang tao te teng ti tian tiao tie ting tong tou tu tuan tui tun tuo wa wai wan wang wei wen weng wo wu xi xia xian xiang xiao xie xin xing xiong xiu xu xuan xue xun ya yan yang yao ye yi yin ying yo yong you yu yuan yue yun za zai zan zang zao ze zei zen zeng zha zhai zhan zhang zhao zhe zhei zhen zheng zhi zhong zhou zhu zhua zhuai zhuan zhuang zhui zhun zhuo zi zong zou zu zuan zui zun zuo').split(' '));
+
+/* ================= 界面渲染 ================= */
+function cell(t,act,payload,cls=''){return `<div class="cell ${cls}" data-cell data-act="${act}" data-t="${typeof payload==='string'?payload.replace(/"/g,'&quot;'):''}">${t}</div>`}
+function renderHome(){
+  let h='';
+  for(const name of Object.keys(CATS)) h+=cell(`💬<br>${name}`,'cat',name);
+  h+=cell('⌨️<br>拼音键盘','go','scr-kb');
+  h+='<div class="cell red" data-cell data-act="emerg">🆘<br>紧急呼叫</div>';
+  h+=cell('⚙️<br>设置','go','scr-set');
+  const c=CUSTOM.length?`<div class="cell" data-cell data-act="cat" data-t="__custom">⭐<br>自定义</div>`:'';
+  $('#homeGrid').innerHTML=c+h;
+}
+function renderCat(name){
+  const list=name==='__custom'?CUSTOM:CATS[name];
+  $('#catTitle').textContent=name==='__custom'?'自定义':name;
+  $('#catGrid').innerHTML=list.map(p=>`<div class="cell" data-cell data-act="say" data-t="${p.replace(/"/g,'&quot;')}">${p}</div>`).join('')||'<div class="cell">（暂无，请到设置中添加）</div>';
+}
+let kb={sheng:null,buf:''};
+const disp=s=>s.replace(/v/g,'ü');
+function renderKb(){
+  let h='';
+  if(kb.sheng===null){
+    h+='<div class="cell green" data-cell data-act="kbZero">∅<br><small>直接韵母（a/o/e…）</small></div>';
+    h+=SHENG.map(s=>`<div class="cell" data-cell data-act="kbS" data-t="${s}">${s}</div>`).join('');
+    $('#kbMsg').textContent='第 1 步：选择声母';
+  }else{
+    h+=`<div class="cell red" data-cell data-act="kbResetS">${disp(kb.sheng)}<br><small>重选声母</small></div>`;
+    h+=YUN.map(s=>`<div class="cell" data-cell data-act="kbY" data-t="${s}">${disp(s)}</div>`).join('');
+    $('#kbMsg').textContent=`第 2 步：${disp(kb.sheng)} + 选择韵母`;
+  }
+  $('#kbGrid').innerHTML=h;
+  $('#buf').textContent=kb.buf?kb.buf.split(' ').map(disp).join(' · '):'（未输入）';
+  const list=cands();
+  $('#candGrid').innerHTML=list.length?list.map(c=>`<div class="cell green" data-cell data-act="pick" data-t="${c.w}">${c.w}<br><small>${disp(c.p)}</small></div>`).join(''):'<div class="cell" style="grid-column:1/-1;color:var(--dim)">'+(kb.buf?'无匹配，继续拼写或删除':'候选字词将显示在这里')+'</div>';
+}
+function cands(){
+  const b=kb.buf.replace(/ /g,'');if(!b)return[];
+  const out=[],seen=new Set();
+  const ch=SINGLE[b];if(ch)for(const c of ch){out.push({w:c,p:b});seen.add(c)}
+  for(const [w,p] of WORDS)if(p.startsWith(b)&&!seen.has(w)){out.push({w,p});seen.add(w)}
+  return out.slice(0,8);
+}
+function go(id){document.querySelectorAll('main').forEach(m=>m.classList.remove('on'));$('#'+id).classList.add('on');if(id==='scr-kb')renderKb();if(id==='scr-home')renderHome();}
+
+/* ================= 语音 ================= */
+function speak(text){
+  if(!text)return;
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(text);u.lang='zh-CN';
+  const v=voices.find(v=>/zh|中文|Chinese/i.test(v.lang+v.name));if(v)u.voice=v;
+  u.rate=S.rate;u.volume=S.vol;speechSynthesis.speak(u);
+  toast('🔊 '+text);
+}
+function addSent(t){sent+=t;$('#sent').textContent=sent;speak(t)}
+function beep(n){
+  try{
+    const ctx=window._ac||(window._ac=new (window.AudioContext||window.webkitAudioContext)());
+    let i=0;const t=setInterval(()=>{if(i++>=n){clearInterval(t);return}
+      const o=ctx.createOscillator(),g=ctx.createGain();o.connect(g);g.connect(ctx.destination);
+      o.frequency.value=880;g.gain.setValueAtTime(1,ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.4);o.start();o.stop(ctx.currentTime+.45)},600);
+  }catch(e){}
+}
+function emergency(){speak('我需要帮助，请快来帮我！');beep(5);$('#flash').classList.add('on');setTimeout(()=>$('#flash').classList.remove('on'),3200)}
+function toast(m){const t=$('#toast');t.textContent=m;t.style.display='block';clearTimeout(t._h);t._h=setTimeout(()=>t.style.display='none',2200)}
+
+/* ================= 激活动作 ================= */
+function activate(el){
+  const a=el.dataset.act;
+  switch(a){
+    case 'say':addSent(el.dataset.t);break;
+    case 'cat':renderCat(el.dataset.t);go('scr-cat');break;
+    case 'go':go(el.dataset.t);break;
+    case 'saySent':speak(sent);break;
+    case 'clearSent':sent='';$('#sent').textContent='（点击短语开始说话）';break;
+    case 'emerg':emergency();break;
+    case 'kbSay':speak(sent);break;
+    case 'kbDel':sent=sent.slice(0,-1);$('#sent').textContent=sent||'（空）';break;
+    case 'kbClear':sent='';kb={sheng:null,buf:''};$('#sent').textContent='（空）';renderKb();break;
+    case 'kbS':kb.sheng=el.dataset.t;renderKb();break;
+    case 'kbY':{
+      const p=kb.sheng+el.dataset.t;
+      if(SYL_SET.has(p)){kb.buf+=(kb.buf?' ':'')+p;kb.sheng=null;renderKb()}
+      else toast('无此音节：'+disp(p));
+      break}
+    case 'kbZero':kb.sheng='';$('#kbMsg').textContent='选择韵母';break;
+    case 'kbResetS':kb.sheng=null;renderKb();break;
+    case 'pick':addSent(el.dataset.t);kb={sheng:null,buf:''};renderKb();break;
+    case 'calib':startCalib();break;
+    case 'calibCancel':calibrating=false;$('#calib').hidden=true;break;
+    case 'saveCustom':CUSTOM=$('#customTa').value.split('\n').map(x=>x.trim()).filter(Boolean);localStorage.setItem('eyeaac_c',JSON.stringify(CUSTOM));toast('已保存 '+CUSTOM.length+' 条自定义短语');renderHome();break;
+    default:el.click();
+  }
+}
+
+/* ================= 眼控引擎 ================= */
+let coef=JSON.parse(localStorage.getItem('eyeaac_coef')||'null');
+let calibrating=false,calibSamples=[],calibPt=null;
+let smooth={x:innerWidth/2,y:innerHeight/2},lastEl=null,dwellStart=0,lastAct=0,lastFace=0;
+let simPos={x:innerWidth/2,y:innerHeight/2};
+let VW=640,VH=480;
+const ring=$('#ring'),cursor=$('#gaze');
+
+function frame(t){
+  requestAnimationFrame(frame);
+  const useSim=S.sim||!coef;
+  const cx=useSim?simPos.x:smooth.x, cy=useSim?simPos.y:smooth.y;
+  cursor.hidden=false;
+  cursor.style.transform=`translate(${cx-25}px,${cy-25}px)`;
+  const faceOK=S.sim||performance.now()-lastFace<1200;
+  $('#faceLost').hidden=faceOK;
+  if(!faceOK||calibrating){ring.style.display='none';lastEl=null;return}
+  const hit=document.elementFromPoint(cx,cy);
+  const el=hit&&hit.closest?hit.closest('[data-cell]'):null;
+  if(!el||t-lastAct<900){ring.style.display='none';lastEl=null;return}
+  if(el!==lastEl){lastEl=el;dwellStart=t}
+  const p=Math.min(1,(t-dwellStart)/S.dwell);
+  const r=el.getBoundingClientRect();
+  Object.assign(ring.style,{display:'block',left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px',
+    background:`conic-gradient(rgba(255,176,32,.9) ${p*360}deg, rgba(255,255,255,.07) 0deg)`});
+  if(p>=1){activate(el);lastAct=t;lastEl=null;ring.style.display='none'}
+}
+requestAnimationFrame(frame);
+document.addEventListener('mousemove',e=>{if(S.sim){simPos={x:e.clientX,y:e.clientY}}});
+document.addEventListener('touchmove',e=>{if(S.sim){simPos={x:e.touches[0].clientX,y:e.touches[0].clientY}}},{passive:true});
+
+function dist(a,b){return Math.hypot((a.x-b.x)*VW,(a.y-b.y)*VH)}
+function computeFeat(lm){
+  const eye=(ir,c1,c2)=>{const cx=(c1.x+c2.x)/2,cy=(c1.y+c2.y)/2,w=dist(c1,c2)||1e-6;
+    return {gx:(ir.x-cx)/w,gy:(ir.y-cy)/w}};
+  const L=eye(lm[473],lm[33],lm[133]),R=eye(lm[468],lm[362],lm[263]);
+  if(S.eye==='left')return L;if(S.eye==='right')return R;
+  return {gx:(L.gx+R.gx)/2,gy:(L.gy+R.gy)/2};
+}
+/* 眨眼检测（相对阈值，自适应） */
+let earMax=0.25,earHist=[],blinkCd=0;
+function blink(lm){
+  const ear=(a,b,c,d,e,f)=>(dist(lm[c],lm[f])+dist(lm[d],lm[e]))/(2*dist(lm[a],lm[b]));
+  const e=(ear(33,133,160,158,153,144)+ear(263,362,387,385,380,373))/2;
+  earHist.push(e);if(earHist.length>45)earHist.shift();
+  earMax=Math.max(earMax*.995,Math.max(...earHist));
+  const now=performance.now();
+  if(now<blinkCd)return;
+  if(e<earMax*0.55){blinkCd=now+700;
+    if(lastEl&&now-lastAct>900){const el=lastEl;activate(el);lastAct=now;lastEl=null;ring.style.display='none';toast('眨眼确认')}}
+}
+function onResults(res){
+  lastFace=performance.now();
+  const lm=res.multiFaceLandmarks&&res.multiFaceLandmarks[0];if(!lm)return;
+  const f=computeFeat(lm);if(!f)return;
+  if(S.blink)blink(lm);
+  if(calibrating&&calibPt){calibSamples.push({gx:f.gx,gy:f.gy,sx:calibPt.sx,sy:calibPt.sy});calibPt.n++;return}
+  if(coef&&!S.sim){
+    const tx=coef.x[0]*f.gx+coef.x[1]*f.gy+coef.x[2];
+    const ty=coef.y[0]*f.gx+coef.y[1]*f.gy+coef.y[2];
+    smooth.x+=(tx-smooth.x)*.35;smooth.y+=(ty-smooth.y)*.35;
+  }
+  if(S.debug)$('#dbgTxt').textContent=`gx:${f.gx.toFixed(3)} gy:${f.gy.toFixed(3)}\n预测:${(coef?coef.x[0]*f.gx+coef.x[1]*f.gy+coef.x[2]:0)|0},${(coef?coef.y[0]*f.gx+coef.y[1]*f.gy+coef.y[2]:0)|0}\nEARmax:${earMax.toFixed(2)} 人脸:OK`;
+}
+/* 最小二乘拟合 [gx,gy,1] -> sx/sy */
+function solve3(A,b){
+  for(let i=0;i<3;i++){let m=i;for(let j=i+1;j<3;j++)if(Math.abs(A[j][i])>Math.abs(A[m][i]))m=j;
+    [A[i],A[m]]=[A[m],A[i]];[b[i],b[m]]=[b[m],b[i]];
+    for(let j=i+1;j<3;j++){const f=A[j][i]/A[i][i];for(let k=i;k<3;k++)A[j][k]-=f*A[i][k];b[j]-=f*b[i]}}
+  const x=[0,0,0];for(let i=2;i>=0;i--){x[i]=b[i];for(let k=i+1;k<3;k++)x[i]-=A[i][k]*x[k];x[i]/=A[i][i]}return x;
+}
+function fit(samples){
+  const A=[[0,0,0],[0,0,0],[0,0,0]],bx=[0,0,0],by=[0,0,0];
+  for(const s of samples){const r=[s.gx,s.gy,1];
+    for(let i=0;i<3;i++){for(let j=0;j<3;j++)A[i][j]+=r[i]*r[j];bx[i]+=r[i]*s.sx;by[i]+=r[i]*s.sy}}
+  return {x:solve3(A.map(r=>r.slice()),bx.slice()),y:solve3(A.map(r=>r.slice()),by.slice())};
+}
+const PTS=[[.12,.16],[.5,.16],[.88,.16],[.12,.5],[.5,.5],[.88,.5],[.12,.84],[.5,.84],[.88,.84]];
+function startCalib(){
+  calibrating=true;calibSamples=[];coef=null;$('#calib').hidden=false;step(0);
+}
+function step(i){
+  if(!calibrating)return;
+  if(i>=PTS.length)return finishCalib();
+  const dot=$('#calibDot');dot.style.left=PTS[i][0]*100+'%';dot.style.top=PTS[i][1]*100+'%';
+  calibPt={sx:PTS[i][0]*innerWidth,sy:PTS[i][1]*innerHeight,n:0};
+  $('#calibHint').textContent=`校准时，请始终注视亮点（第 ${i+1}/${PTS.length} 个），保持头部不动`;
+  const t0=performance.now();
+  (function tick(){if(!calibrating)return;
+    if(performance.now()-t0<1500)requestAnimationFrame(tick);
+    else if(calibPt.n<4){toast('该点样本不足，请正对屏幕');setTimeout(()=>step(i),800)}
+    else step(i+1)})();
+}
+function finishCalib(){
+  calibrating=false;$('#calib').hidden=true;
+  if(calibSamples.length<30){toast('校准失败，请重试');return}
+  coef=fit(calibSamples);localStorage.setItem('eyeaac_coef',JSON.stringify(coef));
+  toast('✅ 校准完成，眼控已开启');
+}
+
+/* ================= 摄像头初始化 ================= */
+async function init(){
+  renderHome();renderKb();
+  try{navigator.wakeLock&&await navigator.wakeLock.request('screen')}catch(e){}
+  if(typeof FaceMesh==='undefined'){
+    toast('眼控引擎加载失败（需联网首次加载），已切换鼠标模拟模式');
+    S.sim=true;$('#setSim').checked=true;return;
+  }
+  const fm=new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
+  fm.setOptions({maxNumFaces:1,refineLandmarks:true,minDetectionConfidence:.5,minTrackingConfidence:.5});
+  fm.onResults(onResults);
+  const video=$('#cam');
+  try{
+    const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:640,height:480},audio:false});
+    video.srcObject=st;await video.play();VW=video.videoWidth||640;VH=video.videoHeight||480;
+    if(S.debug){$('#dbgVideo').srcObject=st;$('#dbgVideo').play()}
+    let busy=false;
+    (async function loop(){
+      requestAnimationFrame(loop);
+      if(busy||video.readyState<2)return;busy=true;
+      try{await fm.send({image:video})}catch(e){}busy=false;
+    })();
+    if(!coef)startCalib();
+  }catch(e){
+    toast('无法访问摄像头，已切换鼠标模拟模式（设置中可重试）');
+    S.sim=true;$('#setSim').checked=true;
+  }
+}
+
+/* ================= 设置绑定 ================= */
+function bindSet(){
+  const d=$('#setDwell'),r=$('#setRate'),v=$('#setVol');
+  d.value=S.dwell;r.value=S.rate;v.value=S.vol;
+  $('#dwellV').textContent=(S.dwell/1000).toFixed(1)+'s';
+  $('#rateV').textContent=S.rate.toFixed(1);$('#volV').textContent=S.vol.toFixed(1);
+  d.oninput=()=>{S.dwell=+d.value;$('#dwellV').textContent=(S.dwell/1000).toFixed(1)+'s';saveS()};
+  r.oninput=()=>{S.rate=+r.value;$('#rateV').textContent=S.rate.toFixed(1);saveS()};
+  v.oninput=()=>{S.vol=+v.value;$('#volV').textContent=S.vol.toFixed(1);saveS()};
+  $('#setEye').value=S.eye;$('#setEye').onchange=e=>{S.eye=e.target.value;saveS();toast('已切换，建议重新校准')};
+  $('#setBlink').checked=S.blink;$('#setBlink').onchange=e=>{S.blink=e.target.checked;saveS()};
+  $('#setSim').checked=S.sim;$('#setSim').onchange=e=>{S.sim=e.target.checked;saveS();toast(S.sim?'鼠标模拟模式开启':'眼控模式开启')};
+  $('#setDebug').checked=S.debug;$('#setDebug').onchange=e=>{S.debug=e.target.checked;$('#debug').style.display=S.debug?'block':'none';saveS();
+    if(S.debug){const vi=$('#cam');if(vi.srcObject)$('#dbgVideo').srcObject=vi.srcObject,$('#dbgVideo').play().catch(()=>{})}};
+  $('#debug').style.display=S.debug?'block':'none';
+  $('#customTa').value=CUSTOM.join('\n');
+}
+function saveS(){localStorage.setItem('eyeaac_s',JSON.stringify(S))}
+bindSet();
+init();
+</script>
+</body>
+</html>
